@@ -7,6 +7,7 @@ import numpy as np
 import cv2
 import io
 from io import BytesIO
+import re
 
 def preprocess_image(pil_img):
     img = np.array(pil_img)
@@ -15,6 +16,7 @@ def preprocess_image(pil_img):
         gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )[1]
     return Image.fromarray(gray)
+
 
 def extract_with_pypdf2(path):
     if isinstance(path, bytes):
@@ -28,8 +30,8 @@ def extract_with_pypdf2(path):
         t = page.extract_text()
         if t:
             text += t + "\n"
-
     return text.strip()
+
 
 def extract_with_ocr(path):
     if isinstance(path, bytes):
@@ -57,6 +59,7 @@ def extract_with_ocr(path):
 
     return text.strip()
 
+
 def pdf2text_hybrid(path):
     try:
         text = extract_with_pypdf2(path)
@@ -68,8 +71,19 @@ def pdf2text_hybrid(path):
         print("HYBRID ERROR:", e)
         return ""
 
-REQUIRED_FIELDS = {
 
+def normalize_text(text):
+    return text.lower().strip() if text else ""
+
+
+def normalize_aadhar(text):
+    if not text:
+        return ""
+    text = re.sub(r"[\s\-]", "", text)
+    text = re.sub(r"[^0-9]", "", text)
+    return text
+
+REQUIRED_FIELDS = {
     "10th_marksheet": [
         "name",
         "father_name",
@@ -100,48 +114,54 @@ REQUIRED_FIELDS = {
     ]
 }
 
-
 def match_required_fields(extracted_text, input_fields, required_fields):
-    extracted_text = extracted_text.lower()
+    extracted_text_lower = normalize_text(extracted_text)
     matched = {}
 
     if "aadhar_number" in required_fields or "vid_number" in required_fields:
         aadhar = input_fields.get("aadhar_number")
         vid = input_fields.get("vid_number")
 
+        normalized_text = normalize_aadhar(extracted_text)
+
         if aadhar:
-            matched["aadhar_number"] = aadhar.lower() in extracted_text
+            normalized_aadhar = normalize_aadhar(aadhar)
+            matched["aadhar_number"] = normalized_aadhar in normalized_text
+
         elif vid:
-            matched["vid_number"] = vid.lower() in extracted_text
+            normalized_vid = normalize_aadhar(vid)
+            matched["vid_number"] = normalized_vid in normalized_text
 
         if input_fields.get("name"):
-            matched["name"] = input_fields["name"].lower() in extracted_text
+            matched["name"] = normalize_text(input_fields["name"]) in extracted_text_lower
 
         return matched
 
     for field in required_fields:
-
         value = input_fields.get(field)
-
         if not value:
             continue
-
-        matched[field] = value.lower() in extracted_text
+        matched[field] = normalize_text(value) in extracted_text_lower
 
     return matched
 
+
 def verify_documents(uploaded_docs, input_fields):
     results = {}
+
     for doc_type, file_data in uploaded_docs.items():
         if not file_data:
             continue
+
         extracted_text = pdf2text_hybrid(file_data)
         required_fields = REQUIRED_FIELDS.get(doc_type, [])
+
         matched_data = match_required_fields(
             extracted_text,
             input_fields,
             required_fields
         )
+
         matched_count = sum(matched_data.values())
         total_fields = len(matched_data)
 
@@ -157,4 +177,5 @@ def verify_documents(uploaded_docs, input_fields):
             "percentage_matched": percentage,
             "verified_status": status
         }
+
     return results
