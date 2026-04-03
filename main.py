@@ -19,8 +19,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = "uploaded_docs"
-REGISTRY_PATH = "registry.json"
+BASE = os.getenv("PERSISTENT_DIR", ".")
+
+UPLOAD_DIR    = os.path.join(BASE, "uploaded_docs")
+REGISTRY_PATH = os.path.join(BASE, "registry.json")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -82,6 +84,9 @@ async def upload_brochure(
     if not re.fullmatch(r"[a-zA-Z0-9]+", clgcode):
         raise HTTPException(400, "clgcode must be alphanumeric only")
 
+    if clgcode in registry:
+        raise HTTPException(409, f"Brochure for '{clgcode}' already exists. Use /update-brochure to replace.")
+
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "Only PDF files allowed")
 
@@ -96,6 +101,35 @@ async def upload_brochure(
 
     return {
         "status": "brochure uploaded and indexed",
+        "clgcode": clgcode,
+        "clg_name": clg_name,
+        "chunks_created": len(docs)
+    }
+
+
+@app.post("/update-brochure")
+async def update_brochure(
+    clgcode: str = Form(...),
+    clg_name: str = Form(...),
+    file: UploadFile = File(...)
+):
+    if not re.fullmatch(r"[a-zA-Z0-9]+", clgcode):
+        raise HTTPException(400, "clgcode must be alphanumeric only")
+
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(400, "Only PDF files allowed")
+
+    path = os.path.join(UPLOAD_DIR, f"{clgcode}.pdf")
+    with open(path, "wb") as f:
+        f.write(await file.read())
+
+    docs = ingest_pdf(clgcode, clg_name, path)
+
+    registry[clgcode] = clg_name
+    save_registry(registry)
+
+    return {
+        "status": "brochure updated and re-indexed",
         "clgcode": clgcode,
         "clg_name": clg_name,
         "chunks_created": len(docs)

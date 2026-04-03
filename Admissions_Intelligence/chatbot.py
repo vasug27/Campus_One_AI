@@ -16,8 +16,10 @@ from langchain_community.chat_message_histories import ChatMessageHistory
 
 load_dotenv()
 
-VECTOR_BASE = "vectorstore"
-DOCS_BASE = "raw_docs"
+BASE = os.getenv("PERSISTENT_DIR", ".")
+
+VECTOR_BASE = os.path.join(BASE, "vectorstore")
+DOCS_BASE   = os.path.join(BASE, "raw_docs")
 
 os.makedirs(VECTOR_BASE, exist_ok=True)
 os.makedirs(DOCS_BASE, exist_ok=True)
@@ -125,12 +127,13 @@ def build_chain(clgcode: str):
         (
             "system",
             """You are an AI admission assistant for a university.
-               Answer ONLY from the provided admission brochure context.
-               Always cite the page number(s) your answer is drawn from, e.g. "(Page 4)".
-               If the answer cannot be found in the context, say exactly:
-               "I could not find that information in the brochure. Please contact the university directly."
-            Context:
-            {context}"""
+Answer ONLY from the provided admission brochure context.
+Always cite the page number(s) your answer is drawn from, e.g. "(Page 4)".
+If the answer cannot be found in the context, say exactly:
+"I could not find that information in the brochure. Please contact the university directly."
+
+Context:
+{context}"""
         ),
         MessagesPlaceholder(variable_name="history"),
         ("human", "{question}"),

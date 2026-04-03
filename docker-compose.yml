@@ -1,0 +1,15 @@
+services:
+  api:
+    build: .
+    ports:
+      - "10000:10000"
+    env_file:
+      - .env
+    environment:
+      - PERSISTENT_DIR=/data
+    volumes:
+      - campus_data:/data
+    restart: unless-stopped
+
+volumes:
+  campus_data:
