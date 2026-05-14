@@ -8,8 +8,24 @@ from typing import List
 
 from Admissions_Intelligence.stringmatching import verify_documents
 from Admissions_Intelligence.chatbot import ingest_pdf, ask_question
+from Academic_Intelligence.help_bot import router as helpbot_router
+from Academic_Intelligence.faculty_planner import router as faculty_router
 
-app = FastAPI(title="Campus One AI – Admissions Intelligence API")
+app = FastAPI(
+    title="Campus One AI",
+    description="Admissions Intelligence + Academic Intelligence API",
+    version="1.0.0",
+    openapi_tags=[
+        {
+            "name": "Admissions Intelligence",
+            "description": "Document verification, brochure ingestion, and RAG-powered college chatbot.",
+        },
+        {
+            "name": "Academic Intelligence",
+            "description": "Student help bot (document Q&A with session history) and faculty tools (course planner, question paper generator).",
+        },
+    ],
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,9 +35,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-BASE = os.getenv("PERSISTENT_DIR", ".")
+app.include_router(helpbot_router)
+app.include_router(faculty_router)
 
-UPLOAD_DIR    = os.path.join(BASE, "uploaded_docs")
+BASE = os.getenv("PERSISTENT_DIR", ".")
+UPLOAD_DIR = os.path.join(BASE, "uploaded_docs")
 REGISTRY_PATH = os.path.join(BASE, "registry.json")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -42,19 +60,19 @@ def save_registry(reg: dict):
 registry = load_registry()
 
 
-@app.get("/")
+@app.get("/", tags=["Admissions Intelligence"])
 def home():
     return {
         "status": "ok",
-        "message": "Campus One AI – Admissions Intelligence API is live"
+        "message": "Campus One AI API is live",
     }
 
 
-@app.post("/verify")
+@app.post("/verify", tags=["Admissions Intelligence"])
 async def verify_documents_api(
     documents: List[UploadFile] = File(...),
     doc_types: str = Form(...),
-    input_fields: str = Form(...)
+    input_fields: str = Form(...),
 ):
     try:
         input_fields = json.loads(input_fields)
@@ -62,7 +80,6 @@ async def verify_documents_api(
         raise HTTPException(400, "Invalid JSON in input_fields")
 
     doc_types_list = [d.strip() for d in doc_types.split(",") if d.strip()]
-
     if len(documents) != len(doc_types_list):
         raise HTTPException(400, "documents and doc_types count mismatch")
 
@@ -75,18 +92,16 @@ async def verify_documents_api(
     return verify_documents(uploaded_docs, input_fields)
 
 
-@app.post("/upload-brochure")
+@app.post("/upload-brochure", tags=["Admissions Intelligence"])
 async def upload_brochure(
     clgcode: str = Form(...),
     clg_name: str = Form(...),
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
 ):
     if not re.fullmatch(r"[a-zA-Z0-9]+", clgcode):
         raise HTTPException(400, "clgcode must be alphanumeric only")
-
     if clgcode in registry:
         raise HTTPException(409, f"Brochure for '{clgcode}' already exists. Use /update-brochure to replace.")
-
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "Only PDF files allowed")
 
@@ -95,7 +110,6 @@ async def upload_brochure(
         f.write(await file.read())
 
     docs = ingest_pdf(clgcode, clg_name, path)
-
     registry[clgcode] = clg_name
     save_registry(registry)
 
@@ -103,19 +117,18 @@ async def upload_brochure(
         "status": "brochure uploaded and indexed",
         "clgcode": clgcode,
         "clg_name": clg_name,
-        "chunks_created": len(docs)
+        "chunks_created": len(docs),
     }
 
 
-@app.post("/update-brochure")
+@app.post("/update-brochure", tags=["Admissions Intelligence"])
 async def update_brochure(
     clgcode: str = Form(...),
     clg_name: str = Form(...),
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
 ):
     if not re.fullmatch(r"[a-zA-Z0-9]+", clgcode):
         raise HTTPException(400, "clgcode must be alphanumeric only")
-
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "Only PDF files allowed")
 
@@ -124,7 +137,6 @@ async def update_brochure(
         f.write(await file.read())
 
     docs = ingest_pdf(clgcode, clg_name, path)
-
     registry[clgcode] = clg_name
     save_registry(registry)
 
@@ -132,27 +144,25 @@ async def update_brochure(
         "status": "brochure updated and re-indexed",
         "clgcode": clgcode,
         "clg_name": clg_name,
-        "chunks_created": len(docs)
+        "chunks_created": len(docs),
     }
 
 
-@app.get("/colleges")
+@app.get("/colleges", tags=["Admissions Intelligence"])
 def list_colleges():
     return registry
 
 
-@app.post("/chat")
+@app.post("/chat", tags=["Admissions Intelligence"])
 async def chat(
     clgcode: str = Form(...),
     question: str = Form(...),
-    session_id: str = Form(default="default")
+    session_id: str = Form(default="default"),
 ):
     if not re.fullmatch(r"[a-zA-Z0-9]+", clgcode):
         raise HTTPException(400, "clgcode must be alphanumeric only")
-
     if clgcode not in registry:
         raise HTTPException(404, f"College '{clgcode}' not found. Upload brochure first.")
-
     if not question.strip():
         raise HTTPException(400, "Question cannot be empty")
 
