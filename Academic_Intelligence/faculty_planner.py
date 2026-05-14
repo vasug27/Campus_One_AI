@@ -10,7 +10,7 @@ Two endpoints:
    At least one of course_contents or file must be provided.
 
 2. POST /academic/faculty/question-paper
-   - max_marks, paper_type (objective|subjective|mixed), num_questions (required)
+   - max_marks, num_objective, num_subjective, difficulty (required)
    - file: PDF/PPT/TXT with notes/content (optional)
    - syllabus: plain-text content (optional)
    At least one of file or syllabus must be provided.
@@ -26,32 +26,21 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_community.document_loaders import PyPDFLoader, UnstructuredPowerPointLoader
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
-# ---------------------------------------------------------------------------
-# Router
-# ---------------------------------------------------------------------------
 
 router = APIRouter(prefix="/academic/faculty", tags=["Academic Intelligence"])
 
-# ---------------------------------------------------------------------------
-# LLM
-# ---------------------------------------------------------------------------
 
-GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-
-llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
-    google_api_key=GEMINI_API_KEY,
+llm = ChatGroq(
+    model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+    api_key=os.getenv("GROQ_API_KEY", ""),
     temperature=0.3,
 )
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 ALLOWED_EXT = {"pdf", "ppt", "pptx", "txt", "md"}
 
@@ -95,10 +84,6 @@ def _parse_llm_json(raw: str) -> any:
         raw = "\n".join(inner)
     return json.loads(raw.strip())
 
-# ---------------------------------------------------------------------------
-# Endpoint 1 – Course Planner
-# ---------------------------------------------------------------------------
-
 @router.post("/course-planner", summary="Generate lecture-wise course planner")
 async def generate_course_planner(
     subject_name: str = Form(...),
@@ -113,11 +98,6 @@ async def generate_course_planner(
         description="Syllabus / course outline PDF, PPT or TXT (optional if course_contents is provided)"
     ),
 ):
-    """
-    Generates a validated JSON course plan with lecture_number, topic, and remarks.
-
-    Provide **course_contents** (comma-separated topics) OR a **file** (syllabus document), or both.
-    """
     if not re.fullmatch(r"[a-zA-Z0-9]+", subject_code):
         raise HTTPException(400, "subject_code must be alphanumeric only.")
     if not (1 <= num_lectures <= 200):
@@ -185,9 +165,6 @@ async def generate_course_planner(
     except json.JSONDecodeError as e:
         raise HTTPException(500, f"LLM returned invalid JSON: {e}. Snippet: {raw[:300]}")
 
-# ---------------------------------------------------------------------------
-# Endpoint 2 – Question Paper Generator
-# ---------------------------------------------------------------------------
 
 @router.post("/question-paper", summary="Generate question paper with answers")
 async def generate_question_paper(

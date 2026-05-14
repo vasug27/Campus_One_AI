@@ -7,62 +7,42 @@ from typing import Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_groq import ChatGroq
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain_community.document_loaders import PyPDFLoader, UnstructuredPowerPointLoader
 from langchain_core.documents import Document
 
-# ---------------------------------------------------------------------------
-# Router
-# ---------------------------------------------------------------------------
 
 router = APIRouter(prefix="/academic", tags=["Academic Intelligence"])
 
-# ---------------------------------------------------------------------------
-# LLM + Embeddings
-# ---------------------------------------------------------------------------
-
-GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 PERSISTENT_DIR = os.getenv("PERSISTENT_DIR", ".")
 HELPBOT_CHROMA_DIR = os.path.join(PERSISTENT_DIR, "vectorstore", "helpbot")
 
-llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
-    google_api_key=GEMINI_API_KEY,
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "all-MiniLM-L6-v2")
+
+llm = ChatGroq(
+    model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+    api_key=GROQ_API_KEY,
     temperature=0.2,
 )
 
-embeddings = GoogleGenerativeAIEmbeddings(
-    model="models/gemini-embedding-001",
-    google_api_key=GEMINI_API_KEY,
+embeddings = HuggingFaceEmbeddings(
+    model_name=MODEL_PATH,
+    model_kwargs={"device": "cpu"},
+    encode_kwargs={"normalize_embeddings": True},
 )
-
-# ---------------------------------------------------------------------------
-# In-memory session store
-# Structure per session:
-#   {
-#     "session_id": str,
-#     "doc_name": str,
-#     "created_at": str (ISO),
-#     "last_active": str (ISO),
-#     "turn_count": int,
-#     "vectorstore": Chroma,
-#     "history": list[HumanMessage | AIMessage],
-#   }
-# ---------------------------------------------------------------------------
 
 session_store: dict[str, dict] = {}
 
-# ---------------------------------------------------------------------------
-# Response models
-# ---------------------------------------------------------------------------
 
 class MessageOut(BaseModel):
-    role: str        # "user" | "assistant"
+    role: str
     content: str
 
 class ChatResponse(BaseModel):
@@ -86,10 +66,6 @@ class SessionSummary(BaseModel):
     created_at: str
     last_active: str
     total_turns: int
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 ALLOWED_EXTENSIONS = {"pdf", "ppt", "pptx", "txt", "md"}
 
@@ -186,19 +162,11 @@ def _get_session_or_404(session_id: str) -> dict:
         raise HTTPException(404, f"Session '{session_id}' not found. Start a new session via POST /academic/chat/start")
     return session
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-
 @router.post("/chat/start", response_model=ChatResponse, summary="Upload document & ask first question")
 async def start_session(
     file: UploadFile = File(..., description="PDF, PPT, PPTX, TXT or MD file"),
     question: str = Form(..., description="Your first question about the document"),
 ):
-    """
-    Upload an academic document and ask your first question in one shot.
-    Returns a `session_id` — pass it to `/academic/chat/{session_id}` for all follow-up questions.
-    """
     if not question.strip():
         raise HTTPException(400, "Question cannot be empty.")
 
@@ -239,10 +207,6 @@ async def continue_session(
     session_id: str,
     question: str = Form(..., description="Your follow-up question"),
 ):
-    """
-    Ask a follow-up question in an existing session.
-    The model retains full conversation history and resolves pronouns/references automatically.
-    """
     if not question.strip():
         raise HTTPException(400, "Question cannot be empty.")
 
@@ -260,7 +224,6 @@ async def continue_session(
 
 @router.get("/chat/{session_id}/history", response_model=HistoryResponse, summary="Get full conversation history")
 def get_history(session_id: str):
-    """Returns the complete conversation history for a session."""
     session = _get_session_or_404(session_id)
     return HistoryResponse(
         session_id=session_id,
@@ -274,7 +237,6 @@ def get_history(session_id: str):
 
 @router.get("/sessions", response_model=list[SessionSummary], summary="List all active sessions")
 def list_sessions():
-    """Lists all active in-memory sessions (useful for debugging/admin)."""
     return [
         SessionSummary(
             session_id=s["session_id"],

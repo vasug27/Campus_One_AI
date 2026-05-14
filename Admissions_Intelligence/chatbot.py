@@ -2,7 +2,8 @@ import os
 import json
 from dotenv import load_dotenv
 
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_groq import ChatGroq
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -24,13 +25,18 @@ DOCS_BASE   = os.path.join(BASE, "raw_docs")
 os.makedirs(VECTOR_BASE, exist_ok=True)
 os.makedirs(DOCS_BASE, exist_ok=True)
 
-llm = ChatGoogleGenerativeAI(
-    model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-    temperature=0.2
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "all-MiniLM-L6-v2")
+
+llm = ChatGroq(
+    model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+    api_key=os.getenv("GROQ_API_KEY", ""),
+    temperature=0.2,
 )
 
-embeddings = GoogleGenerativeAIEmbeddings(
-    model=os.getenv("EMBEDDING_MODEL", "models/gemini-embedding-001")
+embeddings = HuggingFaceEmbeddings(
+    model_name=MODEL_PATH,
+    model_kwargs={"device": "cpu"},
+    encode_kwargs={"normalize_embeddings": True},
 )
 
 chains = {}
